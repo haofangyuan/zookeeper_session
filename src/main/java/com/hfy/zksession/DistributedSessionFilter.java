@@ -12,6 +12,7 @@ import javax.servlet.annotation.WebFilter;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.hfy.ZooKeeperHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +48,7 @@ public class DistributedSessionFilter implements Filter {
 		ZooKeeperHelper.initialize("localhost:2181");
 
 		//创建组节点
-		ZooKeeperHelper.createGroupNode();
+		ZooKeeperHelper.createSessionGroupNode();
 
 		logger.debug("DistributedSessionFilter.init completed.");
 

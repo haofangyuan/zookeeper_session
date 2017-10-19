@@ -1,4 +1,4 @@
-package com.hfy.zksession;
+package com.hfy;
 
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
@@ -40,7 +40,11 @@ public class ConnectionWatcher implements Watcher {
     public void process(WatchedEvent event) {
         Event.KeeperState state = event.getState();
         if (state == Event.KeeperState.SyncConnected) {
-            signal.countDown();
+//            signal.countDown();
+            if (Event.EventType.None == event.getType() && event.getPath() == null){
+                signal.countDown();
+                logger.info("链接状态：{}", event.getState());
+            }
         }
     }
 }

@@ -1,15 +1,15 @@
-package com.hfy.zksession;
+package com.hfy;
 
-import org.apache.zookeeper.CreateMode;
-import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.ZooDefs;
-import org.apache.zookeeper.ZooKeeper;
+import com.hfy.zksession.SessionMetaData;
+import org.apache.zookeeper.*;
 import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.SerializationUtils;
+import org.springframework.util.StringUtils;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +23,13 @@ public class ZooKeeperHelper {
     private static Logger log = LoggerFactory.getLogger(ZooKeeperHelper.class);
     private static String hosts;
     private static ExecutorService pool = Executors.newCachedThreadPool();
-    private static final String GROUP_NAME = "/SESSIONS";
+    private static final String SESSIONS_GROUP_NAME = "/SESSIONS";
+    private static final String LOCK_GROUP_NAME = "/locknode";
+    private ZooKeeper zk;
+
+    public ZooKeeperHelper() {
+        this.zk = connect();
+    }
 
     /**
      * 初始化
@@ -47,7 +53,7 @@ public class ZooKeeperHelper {
      *
      * @return
      */
-    private static ZooKeeper connect() {
+    public static ZooKeeper connect() {
         ConnectionWatcher cw = new ConnectionWatcher();
         return cw.connection(hosts);
     }
@@ -59,6 +65,16 @@ public class ZooKeeperHelper {
         if (zk != null) {
             try {
                 zk.close();
+            } catch (InterruptedException e) {
+                log.error("{}", e);
+            }
+        }
+    }
+
+    public void close() {
+        if (this.zk != null) {
+            try {
+                this.zk.close();
             } catch (InterruptedException e) {
                 log.error("{}", e);
             }
@@ -107,7 +123,7 @@ public class ZooKeeperHelper {
      */
     private static SessionMetaData getSessionMetaData(String id, ZooKeeper zk) {
         if (zk != null) {
-            String path = GROUP_NAME + "/" + id;
+            String path = SESSIONS_GROUP_NAME + "/" + id;
             try {
                 //检查节点是否存在
                 Stat stat = zk.exists(path, false);
@@ -176,7 +192,7 @@ public class ZooKeeperHelper {
                 //设置最后一次访问时间
                 metadata.setLastAccessTime(now);
                 //更新节点数据
-                String path = GROUP_NAME + "/" + id;
+                String path = SESSIONS_GROUP_NAME + "/" + id;
                 byte[] data = SerializationUtils.serialize(metadata);
                 zk.setData(path, data, metadata.getVersion());
                 log.debug("更新Session节点的元数据完成[" + path + "]");
@@ -195,7 +211,7 @@ public class ZooKeeperHelper {
     public static Map<String, Object> getSessionMap(String id) {
         ZooKeeper zk = connect();
         if (zk != null) {
-            String path = GROUP_NAME + "/" + id;
+            String path = SESSIONS_GROUP_NAME + "/" + id;
             try {
                 //获取元数据
                 SessionMetaData metadata = getSessionMetaData(path, zk);
@@ -234,20 +250,27 @@ public class ZooKeeperHelper {
     /**
      * 创建一个组节点
      */
-    public static void createGroupNode() {
+    public static void createSessionGroupNode() {
+        createGroupNode(SESSIONS_GROUP_NAME);
+    }
+
+    /**
+     * 创建一个组节点
+     */
+    public static void createGroupNode(String path) {
         ZooKeeper zk = connect();
         if (zk != null) {
             try {
                 //检查节点是否存在
-                Stat stat = zk.exists(GROUP_NAME, false);
+                Stat stat = zk.exists(path, false);
                 //stat为null表示无此节点，需要创建
                 if (stat == null) {
                     //创建组件点
-                    String createPath = zk.create(GROUP_NAME, null, ZooDefs.Ids.OPEN_ACL_UNSAFE,
+                    String createPath = zk.create(path, null, ZooDefs.Ids.OPEN_ACL_UNSAFE,
                             CreateMode.PERSISTENT);
                     log.debug("创建节点完成:[" + createPath + "]");
                 } else {
-                    log.debug("组节点已存在，无需创建[" + GROUP_NAME + "]");
+                    log.debug("组节点已存在，无需创建[" + path + "]");
                 }
             } catch (KeeperException | InterruptedException e) {
                 log.error("{}", e);
@@ -268,7 +291,7 @@ public class ZooKeeperHelper {
         }
         ZooKeeper zk = connect(); //连接服务期
         if (zk != null) {
-            String path = GROUP_NAME + "/" + metadata.getId();
+            String path = SESSIONS_GROUP_NAME + "/" + metadata.getId();
             try {
                 //检查节点是否存在
                 Stat stat = zk.exists(path, false);
@@ -328,7 +351,7 @@ public class ZooKeeperHelper {
     public static boolean deleteSessionNode(String sid) {
         ZooKeeper zk = connect(); //连接服务期
         if (zk != null) {
-            String path = GROUP_NAME + "/" + sid;
+            String path = SESSIONS_GROUP_NAME + "/" + sid;
             try {
                 //检查节点是否存在
                 Stat stat = zk.exists(path, false);
@@ -394,7 +417,7 @@ public class ZooKeeperHelper {
         boolean result = false;
         ZooKeeper zk = connect(); //连接服务器
         if (zk != null) {
-            String path = GROUP_NAME + "/" + sid;
+            String path = SESSIONS_GROUP_NAME + "/" + sid;
             try {
                 //检查指定的Session节点是否存在
                 Stat stat = zk.exists(path, false);
@@ -470,7 +493,7 @@ public class ZooKeeperHelper {
     public static Object getSessionData(String sid, String name) {
         ZooKeeper zk = connect(); //连接服务器
         if (zk != null) {
-            String path = GROUP_NAME + "/" + sid;
+            String path = SESSIONS_GROUP_NAME + "/" + sid;
             try {
                 //检查指定的Session节点是否存在
                 Stat stat = zk.exists(path, false);
@@ -508,7 +531,7 @@ public class ZooKeeperHelper {
     public static void removeSessionData(String sid, String name) {
         ZooKeeper zk = connect(); //连接服务器
         if (zk != null) {
-            String path = GROUP_NAME + "/" + sid;
+            String path = SESSIONS_GROUP_NAME + "/" + sid;
             try {
                 //检查指定的Session节点是否存在
                 Stat stat = zk.exists(path, false);
@@ -541,7 +564,7 @@ public class ZooKeeperHelper {
             SessionMetaData metadata = getSessionMetaData(sid, zk);
             if (metadata != null) {
                 //更新节点数据
-                String path = GROUP_NAME + "/" + sid;
+                String path = SESSIONS_GROUP_NAME + "/" + sid;
                 metadata.setMaxIdle(maxIdle);
                 byte[] data = SerializationUtils.serialize(metadata);
                 zk.setData(path, data, metadata.getVersion());
@@ -552,6 +575,113 @@ public class ZooKeeperHelper {
             log.error("{}", e);
         } finally {
             close(zk);
+        }
+    }
+
+    /**
+     * 利用临时顺序节点实现共享锁的改进实现
+     * <p>
+     * 改进后的分布式锁实现，和之前的实现方式唯一不同之处在于，这里设计成每个锁竞争者，
+     * 只需要关注”locknode”节点下序号比自己小的那个节点是否存在即可。
+     * <p>
+     * 算法思路：
+     * 对于加锁操作，可以让所有客户端都去/lock目录下创建临时顺序节点，
+     * 如果创建的客户端发现自身创建节点序列号是/lock/目录下最小的节点，则获得锁。
+     * 否则，监视比自己创建节点的序列号小的节点（比自己创建的节点小的最大节点），进入等待。
+     * @return
+     */
+    public String lock() {
+        String lockZnode = "";
+//        ZooKeeper zk = connect();
+        try {
+            createGroupNode("/locknode");
+
+            String path = zk.create("/locknode/guid-lock", "lock".getBytes(),
+                    ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+            lockZnode = path;
+            System.out.println(Thread.currentThread().getName() + " create lock " + path);
+
+            getLock(path, zk);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+//            close(zk);
+        }
+        return lockZnode;
+    }
+
+    private void getLock(String path, ZooKeeper zk) throws KeeperException, InterruptedException {
+
+        List<String> children = zk.getChildren("/locknode", true);
+        Collections.sort(children);
+        // 自己是序号最小的节点，直接返回
+        if (!StringUtils.isEmpty(path)
+                && !StringUtils.isEmpty(children.get(0))
+                && path.equals("/locknode/" + children.get(0))) {
+            System.out.println(Thread.currentThread().getName() + "  get Lock...");
+            return;
+        }
+        // 不是，获取比自己小的节点中最大的那一个
+        String watchNode = null;
+        for (int i = children.size() - 1; i >= 0; i--) {
+            if (children.get(i).compareTo(path.substring(path.lastIndexOf("/") + 1)) < 0) {
+                watchNode = children.get(i);
+                break;
+            }
+        }
+        System.out.println(">>>>>>>>>>>>>>>>>>>>  " + Thread.currentThread().getName() + "  get watchNode: " + watchNode);
+        // 监听该节点
+        if (watchNode != null) {
+            final String watchNodeTmp = watchNode;
+            // 给当前线程的创建的znode小的znode添加监听，当发生删除事件的时候只叫醒当前的这个线程
+            final Thread thread = Thread.currentThread();
+            // 设置一次Watcher(不能重复设置，只相当于设置一次)只能收到一次Event通知，之后若节点再发生变化，不会再次收到通知，因此每次收到Event后，需要对节点重新设置Watcher。
+            Stat stat1 = zk.exists("/locknode/" + watchNodeTmp, new Watcher() {
+                @Override
+                public void process(WatchedEvent watchedEvent) {
+//                    System.out.println(watchedEvent + "  " + watchedEvent.getType());
+                    if (watchedEvent.getType() == Event.EventType.NodeDeleted) {
+                        System.out.println(">>>>>>>>>>>>>>>>>>>>  " + Thread.currentThread().getName() + "  get watchNode deleted " + watchNodeTmp);
+                        thread.interrupt();
+                    }
+                    try {
+                        zk.exists("/locknode/" + watchNodeTmp, true);
+                    } catch (KeeperException | InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+            });
+            if (stat1 != null) {
+                System.out.println(Thread.currentThread().getName() + " waiting for " + "/locknode/" + watchNode);
+                try {
+                    //等待直到被唤醒
+                    Thread.sleep(1000000000);   // 11天
+                } catch (InterruptedException ex) {
+//                ex.printStackTrace();
+                    System.out.println(Thread.currentThread().getName() + " notify");
+                    System.out.println(Thread.currentThread().getName() + " get Lock...");
+                    return;
+                }
+            } else {
+                getLock(path, zk);
+            }
+        }
+    }
+
+    /**
+     * 释放锁
+     */
+    public void unlock(String lockZnode) {
+//        ZooKeeper zk = connect();
+        try {
+            System.out.println(Thread.currentThread().getName() + " release Lock... " + lockZnode);
+            this.zk.delete(lockZnode, -1);
+        } catch (InterruptedException | KeeperException e) {
+//            e.printStackTrace();
+        } finally {
+//            close(zk);
         }
     }
 }
